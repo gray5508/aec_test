@@ -1,0 +1,13 @@
+name: aec_webrtc_test_311
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - scipy
+  - pip:
+      - sounddevice
+      - soundfile
+      - aec-audio-processing
+      - sherpa-onnx

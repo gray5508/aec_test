@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.idea/
+.pytest_cache/
+.mypy_cache/
+outputs/*
+!outputs/.gitkeep

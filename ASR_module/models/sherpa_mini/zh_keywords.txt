@@ -1,0 +1,3 @@
+x iǎo r uì :1.2 #0.15 @小睿
+x iǎo r uì x iǎo r uì :2.0 #0.05 @小睿小睿
+h ā d e s ī d ōng :1.5 #0.1 @hardstone(拼音捕获)
