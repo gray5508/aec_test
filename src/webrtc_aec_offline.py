@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline test using WebRTC Audio Processing AEC.")
-    parser.add_argument("--mic", default=str(ROOT / "outputs" / "tts_after_speaker_change" / "mic_recording.wav"))
-    parser.add_argument("--ref", default=str(ROOT / "outputs" / "tts_after_speaker_change" / "farend_ref.wav"))
+    parser.add_argument("--mic", default=str(ROOT / "outputs" / "mic_recording.wav"))
+    parser.add_argument("--ref", default=str(ROOT / "outputs" / "farend_ref.wav"))
     parser.add_argument("--out-dir", default=str(ROOT / "outputs" / "webrtc_aec"))
     parser.add_argument("--samplerate", type=int, default=16000, choices=[8000, 16000, 32000, 48000])
     parser.add_argument("--delay-ms", type=int, default=240)

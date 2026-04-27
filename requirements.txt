@@ -1,5 +1,7 @@
 numpy
 scipy
-matplotlib
 soundfile
 sounddevice
+soundcard
+aec-audio-processing
+sherpa-onnx

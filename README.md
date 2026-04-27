@@ -1,31 +1,24 @@
-# AEC Echo Cancel Test
+# WebRTC AEC Barge-in Test
 
-这个小项目用于验证一个最小可行方案：
+这个项目现在只保留 WebRTC AEC 方案：播放本地 TTS 音频，同时录麦克风，把播放信号作为 far-end reference 喂给 WebRTC Audio Processing，得到去回声后的麦克风音频，再送入 sherpa-onnx 做实时 VAD/ASR。
 
-1. 从内存播放已知 TTS wav，也就是 `data/test.wav`。
-2. 同时录麦克风，得到 `outputs/mic_recording.wav`。
-3. 把“实际送到声卡的 TTS 参考信号”保存成 `outputs/farend_ref.wav`。
-4. 离线估计扬声器到麦克风的延迟和回声路径，用 NLMS 自适应滤波从麦克风录音里扣掉 TTS 回声。
+小白教学文档在 `docs\webrtc_aec_tutorial.md`，里面结合代码解释了 `--delay-ms 260`、离线测试和实时插话的完整流程。继续深入的问答记录在 `docs\webrtc_aec_qa.md`。
+
+系统回放捕获实验在 `experiments\wasapi_loopback`，用于尝试 Windows WASAPI loopback，把其他播放器/浏览器/系统声音作为更完整的 `farend_ref`。
 
 ## 环境
 
 ```powershell
-cd E:\project\aec_echo_cancel_test
-& C:\Users\86158\miniconda3\Scripts\conda.exe env create -f environment.yml
-& C:\Users\86158\miniconda3\Scripts\conda.exe activate aec_echo_cancel_test
+cd D:\HST_WORK\py_project\aec_test
+conda env create -f environment_webrtc.yml
+conda activate aec_webrtc_test_311
 ```
 
-如果环境已经创建过：
+如果环境已经建好：
 
 ```powershell
-& C:\Users\86158\miniconda3\Scripts\conda.exe activate aec_echo_cancel_test
-```
-
-WebRTC AEC 测试需要 Python 3.11 环境：
-
-```powershell
-& C:\Users\86158\miniconda3\Scripts\conda.exe env create -f environment_webrtc.yml
-& C:\Users\86158\miniconda3\Scripts\conda.exe activate aec_webrtc_test_311
+conda activate aec_webrtc_test_311
+python -m pip install -r requirements.txt
 ```
 
 ## 1. 查看音频设备
@@ -34,157 +27,67 @@ WebRTC AEC 测试需要 Python 3.11 环境：
 python src\list_devices.py
 ```
 
-记下输入麦克风和输出扬声器的 device id。
+如果不传设备编号，脚本会使用系统默认输入和输出设备。换电脑时建议先看一眼默认设备是否符合预期。
 
-## 2. 播放并录音
-
-先用默认设备：
+## 2. 用 data\test.wav 录一段默认设备测试音频
 
 ```powershell
 python src\play_record.py
 ```
 
-指定设备：
+输出：
+
+- `outputs\mic_recording.wav`：麦克风真实录音，包含扬声器回放漏进麦克风的声音。
+- `outputs\farend_ref.wav`：实际送到扬声器的参考信号。
+- `outputs\recording_metadata.json`：录音参数。
+
+也可以指定设备：
 
 ```powershell
 python src\play_record.py --input-device 1 --output-device 3
 ```
 
-录音时建议：
+## 3. 离线扫 WebRTC AEC 延时
 
-- 扬声器正常外放 `test.wav`。
-- 你在播放期间说话。
-- 麦克风和扬声器保持你真实项目里类似的位置和音量。
-- 先关掉系统“降噪/回声消除/音效增强”，否则测试结果不稳定。
-
-## 3. 离线回声消除
+WebRTC AEC 需要一个 `delay-ms`，它不是自动动态计算出来的。换电脑、声卡、蓝牙/USB 设备、驱动缓冲区后都建议重新试。
 
 ```powershell
-python src\aec_offline.py
+python src\webrtc_aec_offline.py --delay-ms 240 --enable-ns
+python src\webrtc_aec_offline.py --delay-ms 260 --enable-ns
+python src\webrtc_aec_offline.py --delay-ms 300 --enable-ns
+python src\webrtc_aec_offline.py --delay-ms 320 --enable-ns
 ```
 
-输出文件：
+输出在 `outputs\webrtc_aec`。优先听 `cleaned_webrtc_delay_xxxms.wav`，选择 TTS 残留最小、人声损伤可接受的值。
 
-- `outputs/cleaned.wav`：回声消除后的麦克风信号。
-- `outputs/echo_estimate.wav`：算法估计出来的 TTS 回声。
-- `outputs/diagnostic.png`：能量曲线和频谱对比图，需要运行时加 `--plot`。
-
-可调参数示例：
+## 4. 实时插话测试
 
 ```powershell
-python src\aec_offline.py --filter-ms 80 --mu 0.0002 --max-delay-ms 500
+python src\barge_in_aec_asr_test.py --delay-ms 260 --enable-ns --raw-asr
 ```
 
-如果 `cleaned.wav` 比 `mic_recording.wav` 大很多，通常是自适应滤波发散。先试：
+指定设备时：
 
 ```powershell
-python src\aec_offline.py --mu 0.00005 --filter-ms 60
+python src\barge_in_aec_asr_test.py --input-device 1 --output-device 3 --delay-ms 260 --enable-ns --raw-asr
 ```
 
-如果 `mic_recording.wav` 声音本身非常小，先提高麦克风输入音量或播放音量。回声消除需要麦克风里确实录到可测的 TTS 回声；太小的话算法只能在底噪里估计，会很容易误判。
+观察控制台：
 
-## 4. 纯 TTS 标定拟合
+- `CLEAN_ASR`：WebRTC AEC 后的识别结果，理想情况下只识别人的插话，不识别机器人的 TTS。
+- `RAW_ASR`：原始麦克风识别结果，用来对比没有 AEC 时会识别到多少 TTS。
 
-如果录音里没有你说话，只有 TTS 外放被麦克风录进去，优先跑这个更强的离线拟合：
+输出在 `outputs\barge_in_aec_asr`：
 
-```powershell
-python src\fit_fir_offline.py
-```
-
-输出：
-
-- `outputs/cleaned_fir.wav`：FIR 拟合后扣掉回声的结果。
-- `outputs/echo_estimate_fir.wav`：FIR 估计出来的回声。
-- `outputs/echo_path_fir.npy`：估计出来的扬声器到麦克风回声路径。
-
-这个脚本利用整段纯 TTS 录音来拟合固定回声路径，适合验证“这套设备/摆位能不能从参考音频里还原麦克风回声”。但它不是实时方案；实时方案仍然需要分块自适应滤波或 WebRTC/SpeexDSP AEC。
-
-## 5. 扫频标定后消 TTS
-
-生成扫频标定音：
-
-```powershell
-python src\make_chirp.py
-```
-
-播放扫频并录麦克风：
-
-```powershell
-python src\play_record.py --wav data\calib_chirp.wav --out-dir outputs\calib_chirp --input-device 1 --output-device 4 --volume 1.0
-```
-
-用扫频录音拟合回声路径，然后应用到上一条 TTS 录音：
-
-```powershell
-python src\apply_calibrated_fir.py
-```
-
-输出在 `outputs/calibrated_tts`。
-
-## 6. WebRTC AEC 离线测试
-
-```powershell
-& C:\Users\86158\miniconda3\Scripts\conda.exe activate aec_webrtc_test_311
-python src\webrtc_aec_offline.py --delay-ms 240
-```
-
-## 7. Barge-in ASR 实时测试
-
-这个测试会随机播放 `TTS_module/voice/samples` 里的 TTS wav，同时把播放帧作为 far-end reference 喂给 WebRTC AEC。麦克风经 AEC 后实时进入 sherpa-mini VAD+ASR。
-
-```powershell
-& C:\Users\86158\miniconda3\Scripts\conda.exe activate aec_webrtc_test_311
-python src\barge_in_aec_asr_test.py --input-device 1 --output-device 4 --delay-ms 240 --enable-ns --raw-asr
-```
-
-测试时在机器人播放期间直接说话，观察控制台：
-
-- `CLEAN_ASR`：AEC 后的识别，理想情况下不识别机器人自己的 TTS，只识别你的插话。
-- `RAW_ASR`：原始麦克风识别，对比用，通常更容易识别到机器人自己的 TTS。
-
-输出音频和识别日志会保存在 `outputs/barge_in_aec_asr`。
-
-可以试不同延迟：
-
-```powershell
-python src\webrtc_aec_offline.py --delay-ms 0
-python src\webrtc_aec_offline.py --delay-ms 120
-python src\webrtc_aec_offline.py --delay-ms 240
-```
-
-如果扫频太刺耳，可以换成柔和宽频噪声：
-
-```powershell
-python src\make_soft_noise.py
-python src\play_record.py --wav data\calib_soft_noise.wav --out-dir outputs\calib_soft_noise --input-device 1 --output-device 4 --volume 1.0
-python src\apply_calibrated_fir.py --calib-mic outputs\calib_soft_noise\mic_recording.wav --calib-ref outputs\calib_soft_noise\farend_ref.wav
-```
-
-## 判断可行性的关键点
-
-这件事总体是可行的，但不能只“把原 wav 反相相加”。扬声器、房间、麦克风会把 TTS 变成延迟、混响、频响变化、非线性失真的版本，所以需要一个回声路径模型。
-
-本项目先用 NLMS 做离线验证。它适合回答第一个问题：已知 TTS 参考音频时，能否从麦克风录音里明显压低 TTS 成分，同时保留人声。如果这里有效，再迁移到实时项目里，可以考虑 WebRTC AEC、SpeexDSP AEC 或分块频域自适应滤波。
+- `farend_ref.wav`
+- `mic_raw.wav`
+- `mic_clean_webrtc.wav`
+- `report.json`
 
 ## 文件说明
 
-- `data/test.wav`：你的测试 TTS 音频副本。
-- `src/list_devices.py`：列出输入/输出设备。
-- `src/play_record.py`：全双工播放和录音。
-- `src/aec_offline.py`：离线自适应回声消除。
-- `src/fit_fir_offline.py`：用纯 TTS 录音拟合固定 FIR 回声路径。
-- `src/make_chirp.py`：生成扫频标定音。
-- `src/make_soft_noise.py`：生成更柔和的宽频标定音。
-- `src/apply_calibrated_fir.py`：用扫频标定结果消 TTS。
-- `src/webrtc_aec_offline.py`：WebRTC Audio Processing AEC 离线测试。
-- `src/barge_in_aec_asr_test.py`：随机 TTS 播放 + WebRTC AEC + sherpa-mini ASR 实时插话测试。
-- `src/synthetic_check.py`：无需设备的合成数据自测。
-- `src/audio_utils.py`：音频读写、重采样、归一化工具。
-
-## 快速自测
-
-不播放声音，只验证核心滤波代码：
-
-```powershell
-python src\synthetic_check.py
-```
+- `src\list_devices.py`：列出系统音频输入/输出设备。
+- `src\play_record.py`：播放 `data\test.wav` 并同步录麦克风。
+- `src\webrtc_aec_offline.py`：用录好的 `mic_recording.wav` 和 `farend_ref.wav` 离线测试 WebRTC AEC。
+- `src\barge_in_aec_asr_test.py`：随机播放 TTS 样本，实时 WebRTC AEC，再接 sherpa-onnx ASR。
+- `src\audio_utils.py`：音频读写、重采样、归一化、RMS 统计工具。
